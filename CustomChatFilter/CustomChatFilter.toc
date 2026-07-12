@@ -1,8 +1,8 @@
 ## Interface: 30300
 ## Title: Custom Chat Filter |cff66ccffChat Hub|r
 ## Notes: Custom filtering, source controls, LFG and trade boards, and a spam trainer.
-## Author: OpenAI
-## Version: 2.1.0
+## Author: PervyHermit & ChatGPT
+## Version: 2.1.0-beta.1
 ## SavedVariables: CustomChatFilterDB, CustomChatFilterSpamTrainerDB
 
 Activities.lua
