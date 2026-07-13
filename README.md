@@ -145,9 +145,18 @@ Your existing custom word list should remain in the same SavedVariables database
 
 ## Minimap controls
 
-- **Left-click:** open the CCF menu
+- **Left-click:** open the quick CCF menu
 - **Right-click:** open CCF options
 - **Drag:** reposition the minimap button
+
+The quick menu contains:
+
+- LFG
+- Active Instances
+- Trade
+- Spam Suggestions
+
+The standalone Active Instances tracker is pinned: opening and closing the world map should no longer dismiss it.
 
 Hide the minimap button with:
 
@@ -182,6 +191,9 @@ Restore it with:
 
 /ccf minimap show
 /ccf minimap hide
+/ccf active
+/ccf active show
+/ccf active hide
 
 /ccf status
 /ccf help

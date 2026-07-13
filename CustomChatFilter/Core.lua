@@ -5,7 +5,7 @@
 CustomChatFilter = CustomChatFilter or {}
 local CCF = CustomChatFilter
 
-CCF.VERSION = "2.1.0"
+CCF.VERSION = "2.3.0-beta.4"
 CCF.PREFIX = "|cff33ff99CCF:|r "
 CCF.ready = false
 CCF.readyCallbacks = CCF.readyCallbacks or {}
@@ -18,10 +18,15 @@ CCF.activityById = {}
 CCF.activityOrder = {}
 
 local DEFAULTS = {
-    version = 3,
+    version = 5,
     enabled = true,
     words = {},
     blockForeignScripts = true,
+    ignoreList = {
+        enabled = true,
+        includeGroupGuild = true,
+        players = {},
+    },
     filterSources = {
         say = true,
         yell = true,
@@ -32,6 +37,15 @@ local DEFAULTS = {
     discoveredChannels = {},
     channelSettings = {},
     minimap = { hide = false, angle = 225 },
+    activeWindow = {
+        hide = true,
+        width = 235,
+        height = 250,
+        point = "CENTER",
+        relativePoint = "CENTER",
+        x = 380,
+        y = 40,
+    },
     window = {
         width = 900,
         height = 580,
@@ -72,6 +86,36 @@ local PUBLIC_EVENTS = {
 }
 
 local WHISPER_EVENTS = { "CHAT_MSG_WHISPER" }
+
+-- These events are only registered so CCF's player ignore list can suppress
+-- ignored players outside public chat. They are never scanned for spam,
+-- LFG, trade, or custom word filtering.
+local IGNORE_ONLY_EVENTS = {
+    "CHAT_MSG_GUILD",
+    "CHAT_MSG_OFFICER",
+    "CHAT_MSG_PARTY",
+    "CHAT_MSG_PARTY_LEADER",
+    "CHAT_MSG_RAID",
+    "CHAT_MSG_RAID_LEADER",
+    "CHAT_MSG_RAID_WARNING",
+    "CHAT_MSG_BATTLEGROUND",
+    "CHAT_MSG_BATTLEGROUND_LEADER",
+}
+
+local PUBLIC_EVENT_SET = {}
+local WHISPER_EVENT_SET = {}
+local IGNORE_ONLY_EVENT_SET = {}
+
+local eventIndex
+for eventIndex = 1, #PUBLIC_EVENTS do
+    PUBLIC_EVENT_SET[PUBLIC_EVENTS[eventIndex]] = true
+end
+for eventIndex = 1, #WHISPER_EVENTS do
+    WHISPER_EVENT_SET[WHISPER_EVENTS[eventIndex]] = true
+end
+for eventIndex = 1, #IGNORE_ONLY_EVENTS do
+    IGNORE_ONLY_EVENT_SET[IGNORE_ONLY_EVENTS[eventIndex]] = true
+end
 
 local STOP_WORDS = {
     ["a"] = true, ["an"] = true, ["and"] = true, ["are"] = true,
@@ -174,7 +218,7 @@ function CCF:InitializeDatabase()
         CustomChatFilterDB.trainer.threshold = 4
     end
 
-    CustomChatFilterDB.version = 3
+    CustomChatFilterDB.version = 4
     self.db = CustomChatFilterDB
 
     local legacy = CustomChatFilterSpamTrainerDB
@@ -255,6 +299,173 @@ function CCF:StripWoWFormatting(text)
     text = string.gsub(text, "|r", "")
     text = string.gsub(text, "|T.-|t", " ")
     return text
+end
+
+function CCF:CleanPlayerName(name)
+    local value = self:Trim(self:StripWoWFormatting(name or ""))
+    value = string.gsub(value, "^%[", "")
+    value = string.gsub(value, "%]$", "")
+    value = string.match(value, "^(%S+)") or value
+
+    -- 3.3.5a normally supplies a bare character name. Some custom servers or
+    -- backported chat addons append "-Realm", so normalize that form too.
+    local bare = string.match(value, "^([^%-]+)")
+    if bare and bare ~= "" then value = bare end
+
+    return self:Trim(value)
+end
+
+function CCF:NormalizePlayerName(name)
+    return self:Lower(self:CleanPlayerName(name))
+end
+
+function CCF:GetIgnoredPlayers()
+    local result = {}
+    local key, data
+
+    for key, data in pairs(self.db.ignoreList.players or {}) do
+        local displayName = key
+        local added = 0
+        local source = "unknown"
+
+        if type(data) == "table" then
+            displayName = data.name or key
+            added = data.added or 0
+            source = data.source or "unknown"
+        elseif type(data) == "string" then
+            displayName = data
+        end
+
+        table.insert(result, {
+            key = key,
+            name = displayName,
+            added = added,
+            source = source,
+        })
+    end
+
+    table.sort(result, function(a, b)
+        return self:Lower(a.name or "") < self:Lower(b.name or "")
+    end)
+
+    return result
+end
+
+function CCF:IsPlayerIgnored(name)
+    if not self.db.ignoreList.enabled then return false end
+    local key = self:NormalizePlayerName(name)
+    if key == "" then return false end
+    return self.db.ignoreList.players[key] ~= nil
+end
+
+function CCF:RemovePlayerFromBoards(name)
+    local key = self:NormalizePlayerName(name)
+    if key == "" then return end
+
+    local categories = { "lfg", "trade" }
+    local categoryIndex
+
+    for categoryIndex = 1, #categories do
+        local category = categories[categoryIndex]
+        local board = self.boards[category]
+        local index = #board
+        local changed = false
+
+        while index >= 1 do
+            if self:NormalizePlayerName(board[index].author) == key then
+                table.remove(board, index)
+                changed = true
+            end
+            index = index - 1
+        end
+
+        if changed then self:Fire("BOARD_UPDATED", category) end
+    end
+end
+
+function CCF:AddIgnoredPlayer(name, source)
+    local displayName = self:CleanPlayerName(name)
+    local key = self:NormalizePlayerName(displayName)
+
+    if key == "" then
+        return false, "Enter a player name."
+    end
+
+    if self.playerName and key == self:NormalizePlayerName(self.playerName) then
+        return false, "You cannot add your own character to the CCF ignore list."
+    end
+
+    if self.db.ignoreList.players[key] then
+        return false, displayName .. " is already ignored."
+    end
+
+    self.db.ignoreList.players[key] = {
+        name = displayName,
+        added = time(),
+        source = source or "manual",
+    }
+
+    self:RemovePlayerFromBoards(displayName)
+    self:Fire("IGNORES_UPDATED")
+    return true, "Ignored player: " .. displayName
+end
+
+function CCF:RemoveIgnoredPlayer(value)
+    value = self:Trim(value)
+    if value == "" then
+        return false, "Enter a list number or exact player name."
+    end
+
+    local key
+    local number = tonumber(value)
+
+    if number and number == math.floor(number) then
+        local players = self:GetIgnoredPlayers()
+        local item = players[number]
+        if item then key = item.key end
+    else
+        key = self:NormalizePlayerName(value)
+    end
+
+    if not key or not self.db.ignoreList.players[key] then
+        return false, "No matching ignored player was found."
+    end
+
+    local data = self.db.ignoreList.players[key]
+    local displayName = type(data) == "table" and (data.name or key) or tostring(data)
+    self.db.ignoreList.players[key] = nil
+    self:Fire("IGNORES_UPDATED")
+    return true, "Removed from CCF ignore list: " .. displayName
+end
+
+function CCF:ListIgnoredPlayers()
+    local players = self:GetIgnoredPlayers()
+
+    if #players == 0 then
+        self:Print("The CCF player ignore list is empty.")
+        return
+    end
+
+    self:Print("Ignored players:")
+    local index
+    for index = 1, #players do
+        DEFAULT_CHAT_FRAME:AddMessage(
+            string.format("|cffaaaaaa%02d.|r %s", index, players[index].name)
+        )
+    end
+end
+
+function CCF:IgnoreSuggestionAuthors(entry)
+    local authors = entry and entry.authors or {}
+    local added = 0
+    local index
+
+    for index = 1, #authors do
+        local success = self:AddIgnoredPlayer(authors[index], "spam trainer")
+        if success then added = added + 1 end
+    end
+
+    return added
 end
 
 function CCF:NormalizeSearchText(message)
@@ -737,6 +948,70 @@ function CCF:SuggestPhrase(message)
     return bestPhrase
 end
 
+function CCF:DetectInlineRepeat(message)
+    local threshold = (self.db and self.db.trainer and self.db.trainer.threshold) or 4
+    if threshold < 2 then threshold = 2 end
+
+    local words = self:Tokenize(message)
+    if #words < threshold then return nil, 0 end
+
+    local bestWord, bestCount = nil, 0
+    local currentWord, currentCount = nil, 0
+    local index
+
+    for index = 1, #words do
+        local word = words[index]
+        if word == currentWord then
+            currentCount = currentCount + 1
+        else
+            currentWord = word
+            currentCount = 1
+        end
+
+        if currentCount >= threshold and string.len(word) >= 3 and not STOP_WORDS[word] then
+            if currentCount > bestCount then
+                bestWord = word
+                bestCount = currentCount
+            end
+        end
+    end
+
+    return bestWord, bestCount
+end
+
+function CCF:ObserveInlineRepeatSpam(message, author)
+    local trainer = self.db.trainer
+    if not trainer.enabled then return end
+
+    local example = self:StripWoWFormatting(message)
+    local word, count = self:DetectInlineRepeat(example)
+    if not word or count < trainer.threshold then return end
+
+    local fingerprint = "inline_repeat:" .. word
+    if trainer.ignored[fingerprint] or self:FindPendingByFingerprint(fingerprint) then return end
+
+    local entry = {
+        count = count,
+        firstSeen = time(),
+        lastSeen = time(),
+        authors = {},
+        example = example,
+        fingerprint = fingerprint,
+        suggested = true,
+        phrase = word,
+    }
+
+    if author and author ~= "" then
+        local authorKey = self:NormalizePlayerName(author)
+        if authorKey ~= "" then
+            entry.authors[authorKey] = self:CleanPlayerName(author)
+        end
+    end
+
+    self.recentSpam[fingerprint] = entry
+    self:CreateSuggestion(entry)
+end
+
 function CCF:FindPendingById(id)
     local pending, index = self.db.trainer.pending, nil
     for index = 1, #pending do
@@ -756,15 +1031,28 @@ end
 function CCF:CreateSuggestion(entry)
     local trainer = self.db.trainer
     if trainer.ignored[entry.fingerprint] or self:FindPendingByFingerprint(entry.fingerprint) then return end
-    local phrase = self:SuggestPhrase(entry.example)
+    local phrase = entry.phrase or self:SuggestPhrase(entry.example)
     if phrase == "" then return end
+
+    local authors = {}
+    local authorKey, authorName
+    for authorKey, authorName in pairs(entry.authors or {}) do
+        if type(authorName) == "string" and authorName ~= "" then
+            table.insert(authors, authorName)
+        else
+            table.insert(authors, authorKey)
+        end
+    end
+    table.sort(authors, function(a, b) return self:Lower(a) < self:Lower(b) end)
+
     local suggestion = {
         id = trainer.nextId,
         fingerprint = entry.fingerprint,
         phrase = phrase,
         example = entry.example,
         count = entry.count,
-        authorCount = self:CountTableEntries(entry.authors),
+        authorCount = #authors,
+        authors = authors,
         created = time(),
     }
     trainer.nextId = trainer.nextId + 1
@@ -787,6 +1075,9 @@ function CCF:ObserveSpam(message, author, category)
     if not trainer.enabled then return end
     if category == "lfg" and trainer.ignoreLFG then return end
     if category == "trade" and trainer.ignoreTrade then return end
+
+    self:ObserveInlineRepeatSpam(message, author)
+
     local fingerprint = self:MakeFingerprint(message)
     if fingerprint == "" or string.len(fingerprint) < 12 then return end
     local wordCount, unused = 0, nil
@@ -809,18 +1100,25 @@ function CCF:ObserveSpam(message, author, category)
     end
     entry.count = entry.count + 1
     entry.lastSeen = now
-    if author and author ~= "" then entry.authors[self:Lower(author)] = true end
+    if author and author ~= "" then
+        local authorKey = self:NormalizePlayerName(author)
+        if authorKey ~= "" then
+            entry.authors[authorKey] = self:CleanPlayerName(author)
+        end
+    end
     if not entry.suggested and entry.count >= trainer.threshold then
         entry.suggested = true
         self:CreateSuggestion(entry)
     end
 end
 
-function CCF:FinalizeSuggestions(checkedIds)
+function CCF:FinalizeSuggestions(checkedIds, ignoreAuthorIds)
     local pending = self.db.trainer.pending
-    local added, dismissed, index = 0, 0, nil
+    local added, dismissed, ignoredPlayers, index = 0, 0, 0, nil
+
     for index = 1, #pending do
         local entry = pending[index]
+
         if checkedIds and checkedIds[entry.id] then
             local success = self:AddWord(entry.phrase)
             if success then added = added + 1 end
@@ -828,11 +1126,17 @@ function CCF:FinalizeSuggestions(checkedIds)
             self.db.trainer.ignored[entry.fingerprint] = true
             dismissed = dismissed + 1
         end
+
+        if ignoreAuthorIds and ignoreAuthorIds[entry.id] then
+            ignoredPlayers = ignoredPlayers + self:IgnoreSuggestionAuthors(entry)
+        end
+
         self.recentSpam[entry.fingerprint] = nil
     end
+
     self.db.trainer.pending = {}
     self:Fire("TRAINER_UPDATED")
-    return added, dismissed
+    return added, dismissed, ignoredPlayers
 end
 
 function CCF:ProcessPublicMessage(event, message, author, channelName, channelKey)
@@ -857,7 +1161,24 @@ end
 
 function CCF:ChatMessageFilter(event, message, author, channelName, channelBaseName)
     if not self.ready then return false end
-    if author and self.playerName and self:Lower(author) == self:Lower(self.playerName) then return false end
+
+    if author and self.playerName
+        and self:NormalizePlayerName(author) == self:NormalizePlayerName(self.playerName) then
+        return false
+    end
+
+    if author and self:IsPlayerIgnored(author) then
+        if PUBLIC_EVENT_SET[event] or WHISPER_EVENT_SET[event] then
+            return true
+        end
+
+        if IGNORE_ONLY_EVENT_SET[event] and self.db.ignoreList.includeGroupGuild then
+            return true
+        end
+    end
+
+    -- Group/guild events are registered only for the player ignore list.
+    if IGNORE_ONLY_EVENT_SET[event] then return false end
 
     local channelDisplay, channelKey = "", ""
     if event == "CHAT_MSG_CHANNEL" then
@@ -888,8 +1209,15 @@ end
 
 function CCF:RegisterChatFilters()
     local index
-    for index = 1, #PUBLIC_EVENTS do ChatFrame_AddMessageEventFilter(PUBLIC_EVENTS[index], ChatFilterAdapter) end
-    for index = 1, #WHISPER_EVENTS do ChatFrame_AddMessageEventFilter(WHISPER_EVENTS[index], ChatFilterAdapter) end
+    for index = 1, #PUBLIC_EVENTS do
+        ChatFrame_AddMessageEventFilter(PUBLIC_EVENTS[index], ChatFilterAdapter)
+    end
+    for index = 1, #WHISPER_EVENTS do
+        ChatFrame_AddMessageEventFilter(WHISPER_EVENTS[index], ChatFilterAdapter)
+    end
+    for index = 1, #IGNORE_ONLY_EVENTS do
+        ChatFrame_AddMessageEventFilter(IGNORE_ONLY_EVENTS[index], ChatFilterAdapter)
+    end
 end
 
 function CCF:ListWords()
@@ -903,9 +1231,10 @@ end
 
 function CCF:PrintStatus()
     self:Print(string.format(
-        "enabled=%s, words=%d, LFG=%d, Trade=%d, suggestions=%d, channels=%d",
-        self.db.enabled and "yes" or "no", #self.db.words, #self.boards.lfg,
-        #self.boards.trade, #self.db.trainer.pending,
+        "enabled=%s, words=%d, ignored=%d, LFG=%d, Trade=%d, suggestions=%d, channels=%d",
+        self.db.enabled and "yes" or "no", #self.db.words,
+        #self:GetIgnoredPlayers(), #self.boards.lfg, #self.boards.trade,
+        #self.db.trainer.pending,
         self:CountTableEntries(self.db.discoveredChannels)))
 end
 
@@ -913,12 +1242,16 @@ function CCF:PrintHelp()
     self:Print("Commands:")
     DEFAULT_CHAT_FRAME:AddMessage("|cffffffff/ccf hub|r - open the Chat Hub")
     DEFAULT_CHAT_FRAME:AddMessage("|cffffffff/ccf lfg|r, |cffffffff/ccf trade|r, |cffffffff/ccf trainer|r")
-    DEFAULT_CHAT_FRAME:AddMessage("|cffffffff/ccf options [filter|trainer|boards|channels]|r")
+    DEFAULT_CHAT_FRAME:AddMessage("|cffffffff/ccf options [filter|trainer|boards|channels|ignored]|r")
     DEFAULT_CHAT_FRAME:AddMessage("|cffffffff/ccf add <word or phrase>|r")
     DEFAULT_CHAT_FRAME:AddMessage("|cffffffff/ccf del <number or exact phrase>|r")
     DEFAULT_CHAT_FRAME:AddMessage("|cffffffff/ccf list|r")
+    DEFAULT_CHAT_FRAME:AddMessage("|cffffffff/ccf ignore <player>|r")
+    DEFAULT_CHAT_FRAME:AddMessage("|cffffffff/ccf unignore <player or list number>|r")
+    DEFAULT_CHAT_FRAME:AddMessage("|cffffffff/ccf ignores|r")
     DEFAULT_CHAT_FRAME:AddMessage("|cffffffff/ccf test <message>|r")
     DEFAULT_CHAT_FRAME:AddMessage("|cffffffff/ccf minimap show|r or |cffffffff/ccf minimap hide|r")
+    DEFAULT_CHAT_FRAME:AddMessage("|cffffffff/ccf active|r, |cffffffff/ccf active show|r, |cffffffff/ccf active hide|r")
     DEFAULT_CHAT_FRAME:AddMessage("|cffffffff/ccf status|r")
 end
 
@@ -943,11 +1276,48 @@ local function SlashCommand(input)
         CCF:Fire("OPTIONS_UPDATED")
         return
     end
+    if command == "active" or command == "activewindow" then
+        local value = CCF:Lower(rest)
+        if value == "hide" or value == "off" then
+            CCF.db.activeWindow.hide = true
+            if CCF.HideActiveWindow then CCF:HideActiveWindow() end
+            CCF:Print("Standalone active-instances window hidden.")
+        elseif value == "show" or value == "on" then
+            CCF.db.activeWindow.hide = false
+            if CCF.ShowActiveWindow then CCF:ShowActiveWindow() end
+            CCF:Print("Standalone active-instances window shown.")
+        else
+            CCF.db.activeWindow.hide = not CCF.db.activeWindow.hide
+            if CCF.db.activeWindow.hide then
+                if CCF.HideActiveWindow then CCF:HideActiveWindow() end
+                CCF:Print("Standalone active-instances window hidden.")
+            else
+                if CCF.ShowActiveWindow then CCF:ShowActiveWindow() end
+                CCF:Print("Standalone active-instances window shown.")
+            end
+        end
+        CCF:Fire("OPTIONS_UPDATED")
+        return
+    end
     if command == "add" then local success, message = CCF:AddWord(rest); CCF:Print(message); return end
     if command == "del" or command == "delete" or command == "remove" then
         local success, message = CCF:RemoveWord(rest); CCF:Print(message); return
     end
     if command == "list" then CCF:ListWords(); return end
+    if command == "ignore" then
+        local success, message = CCF:AddIgnoredPlayer(rest, "slash command")
+        CCF:Print(message)
+        return
+    end
+    if command == "unignore" then
+        local success, message = CCF:RemoveIgnoredPlayer(rest)
+        CCF:Print(message)
+        return
+    end
+    if command == "ignores" or command == "ignorelist" then
+        CCF:ListIgnoredPlayers()
+        return
+    end
     if command == "test" then
         if rest == "" then CCF:Print("Enter a test message."); return end
         local blocked, reason = CCF:MatchCustomFilter(rest)

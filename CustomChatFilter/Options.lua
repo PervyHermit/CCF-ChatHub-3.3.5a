@@ -3,8 +3,8 @@
 
 local CCF = CustomChatFilter
 local panels, refreshers = {}, {}
-local wordRows, channelRows = {}, {}
-local wordOffset, channelOffset = 0, 0
+local wordRows, channelRows, ignoreRows = {}, {}, {}
+local wordOffset, channelOffset, ignoreOffset = 0, 0, 0
 
 local function Panel(name, parent)
     local p = CreateFrame("Frame")
@@ -24,6 +24,17 @@ end
 
 local function Button(parent,text,width,height)
     local b=CreateFrame("Button",nil,parent,"UIPanelButtonTemplate"); b:SetWidth(width or 120); b:SetHeight(height or 24); b:SetText(text); return b
+end
+
+local function Input(parent,width,height)
+    local e=CreateFrame("EditBox",nil,parent)
+    e:SetWidth(width or 180); e:SetHeight(height or 24)
+    e:SetAutoFocus(false); e:SetFontObject(ChatFontNormal)
+    e:SetTextInsets(6,6,0,0)
+    e:SetBackdrop({bgFile="Interface\\Tooltips\\UI-Tooltip-Background",edgeFile="Interface\\Tooltips\\UI-Tooltip-Border",tile=true,tileSize=16,edgeSize=10,insets={left=3,right=3,top=3,bottom=3}})
+    e:SetBackdropColor(0,0,0,.7); e:SetBackdropBorderColor(.55,.55,.55,1)
+    e:SetScript("OnEscapePressed",function(self) self:ClearFocus() end)
+    return e
 end
 
 local function Checkbox(panel,label,x,y,getter,setter)
@@ -58,7 +69,11 @@ local function CreateGeneral()
     local p=Panel("Custom Chat Filter"); panels.general=p
     Title(p,"Custom Chat Filter — Chat Hub","One chat scan powers custom filtering, spam training, LFG, and trade boards.")
     Heading(p,"Settings sections",18,-82)
-    Nav(p,"Spam Filter","filter",18,-104); Nav(p,"Spam Trainer","trainer",208,-104); Nav(p,"LFG & Trade","boards",398,-104); Nav(p,"Channel Sources","channels",18,-140)
+    Nav(p,"LFG & Trade","boards",18,-104)
+    Nav(p,"Spam Filter","filter",208,-104)
+    Nav(p,"Spam Trainer","trainer",398,-104)
+    Nav(p,"Ignored Players","ignored",18,-140)
+    Nav(p,"Channel Sources","channels",208,-140)
     Heading(p,"Interface",18,-200)
     Checkbox(p,"Show minimap button",15,-218,function() return not CCF.db.minimap.hide end,function(v) CCF.db.minimap.hide=not v end)
     local open=Button(p,"Open Chat Hub",150,26); open:SetPoint("TOPLEFT",20,-260); open:SetScript("OnClick",function() CCF:OpenPage("lfg") end)
@@ -70,7 +85,7 @@ local function CreateGeneral()
     Heading(p,"Current status",18,-326)
     p.status=p:CreateFontString(nil,"OVERLAY","GameFontHighlight"); p.status:SetPoint("TOPLEFT",20,-350); p.status:SetWidth(570); p.status:SetJustifyH("LEFT")
     table.insert(refreshers,function()
-        p.status:SetText(string.format("Filter words: %d\nPending trainer suggestions: %d\nLFG board: %d entries\nTrade board: %d entries\nDiscovered channels: %d",#CCF.db.words,#CCF.db.trainer.pending,#CCF.boards.lfg,#CCF.boards.trade,CCF:CountTableEntries(CCF.db.discoveredChannels)))
+        p.status:SetText(string.format("Filter words: %d\nIgnored players: %d\nPending trainer suggestions: %d\nLFG board: %d entries\nTrade board: %d entries\nDiscovered channels: %d",#CCF.db.words,#CCF:GetIgnoredPlayers(),#CCF.db.trainer.pending,#CCF.boards.lfg,#CCF.boards.trade,CCF:CountTableEntries(CCF.db.discoveredChannels)))
     end)
     p.refresh=RefreshAll
 end
@@ -145,7 +160,7 @@ local function CreateTrainer()
     local open=Button(p,"Open Suggestions",150,26); open:SetPoint("TOPLEFT",337,-155); open:SetScript("OnClick",function() CCF:OpenPage("trainer") end)
     local clear=Button(p,"Dismiss All Pending",150,26); clear:SetPoint("TOPLEFT",open,"BOTTOMLEFT",0,-10); clear:SetScript("OnClick",function() local a,d=CCF:FinalizeSuggestions({}); CCF:Print(d.." pending suggestion(s) dismissed."); RefreshAll() end)
     local reset=Button(p,"Reset Dismissed Patterns",175,26); reset:SetPoint("TOPLEFT",clear,"BOTTOMLEFT",0,-10); reset:SetScript("OnClick",function() CCF.db.trainer.ignored={}; CCF:Print("Dismissed-pattern history cleared."); RefreshAll() end)
-    local note=p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); note:SetPoint("TOPLEFT",reset,"BOTTOMLEFT",0,-14); note:SetWidth(255); note:SetJustifyH("LEFT"); note:SetText("Per-channel trainer toggles are under Channel Sources. The review action is “Add Checked & Dismiss Rest”.")
+    local note=p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); note:SetPoint("TOPLEFT",reset,"BOTTOMLEFT",0,-14); note:SetWidth(255); note:SetJustifyH("LEFT"); note:SetText("The review window can add checked phrases and optionally add detected senders to CCF’s player ignore list.")
     p.refresh=RefreshAll
 end
 
@@ -171,7 +186,167 @@ local function CreateBoards()
     Slider(p,"CustomChatFilterMaxEntriesSliderV21","Maximum entries per board",335,-330,250,50,400,50,function() return CCF.db.boards.maxEntries end,function(v) CCF.db.boards.maxEntries=v end)
     local ol=Button(p,"Open LFG Board",140,26); ol:SetPoint("TOPLEFT",20,-405); ol:SetScript("OnClick",function() CCF:OpenPage("lfg") end)
     local ot=Button(p,"Open Trade Board",140,26); ot:SetPoint("LEFT",ol,"RIGHT",10,0); ot:SetScript("OnClick",function() CCF:OpenPage("trade") end)
-    local note=p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); note:SetPoint("TOPLEFT",20,-455); note:SetWidth(570); note:SetJustifyH("LEFT"); note:SetText("Use Channel Sources to stop one discovered channel from feeding the boards while leaving other channels enabled.")
+    local ow=Button(p,"Open Active Window",150,26); ow:SetPoint("LEFT",ot,"RIGHT",10,0); ow:SetScript("OnClick",function() CCF.db.activeWindow.hide=false; if CCF.ShowActiveWindow then CCF:ShowActiveWindow() end; CCF:Fire("OPTIONS_UPDATED") end)
+    Checkbox(p,"Show standalone active-instances window",18,-445,function() return not CCF.db.activeWindow.hide end,function(v) CCF.db.activeWindow.hide=not v; if CCF.UpdateActiveWindowVisibility then CCF:UpdateActiveWindowVisibility() end end)
+    local note=p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); note:SetPoint("TOPLEFT",38,-475); note:SetWidth(570); note:SetJustifyH("LEFT"); note:SetText("The standalone window shows only currently active LFG instances so players can keep a compact overview while questing.")
+    p.refresh=RefreshAll
+end
+
+
+local function RefreshIgnored()
+    local p=panels.ignored
+    if not p or not CCF.db then return end
+
+    local players=CCF:GetIgnoredPlayers()
+    local maxOffset=math.max(0,#players-#ignoreRows)
+    if ignoreOffset>maxOffset then ignoreOffset=maxOffset end
+
+    local i
+    for i=1,#ignoreRows do
+        local row=ignoreRows[i]
+        local item=players[i+ignoreOffset]
+        row.item=item
+
+        if item then
+            row.name:SetText((i+ignoreOffset)..". "..item.name)
+            row.source:SetText(item.source and ("Added via "..item.source) or "")
+            row:Show()
+        else
+            row:Hide()
+        end
+    end
+
+    p.ignorePage:SetText(
+        #players==0
+            and "No ignored players"
+            or ((ignoreOffset+1).."–"..math.min(ignoreOffset+#ignoreRows,#players).." of "..#players)
+    )
+
+    if ignoreOffset>0 then p.ignorePrev:Enable() else p.ignorePrev:Disable() end
+    if ignoreOffset<maxOffset then p.ignoreNext:Enable() else p.ignoreNext:Disable() end
+end
+
+local function CreateIgnoredPlayers()
+    local p=Panel("Ignored Players","Custom Chat Filter")
+    panels.ignored=p
+
+    Title(
+        p,
+        "Ignored Players",
+        "CCF’s own account-wide ignore list. It does not modify WoW’s built-in ignore list."
+    )
+
+    Checkbox(
+        p,
+        "Enable CCF player ignore list",
+        15,
+        -72,
+        function() return CCF.db.ignoreList.enabled end,
+        function(v) CCF.db.ignoreList.enabled=v end
+    )
+
+    Checkbox(
+        p,
+        "Also hide ignored players in guild, party, raid, and battleground chat",
+        15,
+        -100,
+        function() return CCF.db.ignoreList.includeGroupGuild end,
+        function(v) CCF.db.ignoreList.includeGroupGuild=v end
+    )
+
+    Heading(p,"Add player",18,-145)
+
+    p.ignoreEdit=Input(p,220,24)
+    p.ignoreEdit:SetPoint("TOPLEFT",22,-170)
+    p.ignoreEdit:SetMaxLetters(60)
+
+    p.ignoreAdd=Button(p,"Ignore",75,22)
+    p.ignoreAdd:SetPoint("LEFT",p.ignoreEdit,"RIGHT",6,0)
+
+    p.ignoreAdd:SetScript("OnClick",function()
+        local ok,msg=CCF:AddIgnoredPlayer(p.ignoreEdit:GetText(),"options")
+        CCF:Print(msg)
+        if ok then
+            p.ignoreEdit:SetText("")
+            RefreshIgnored()
+        end
+    end)
+
+    p.ignoreEdit:SetScript("OnEnterPressed",function(self)
+        p.ignoreAdd:Click()
+        self:ClearFocus()
+    end)
+
+    local help=p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+    help:SetPoint("TOPLEFT",p.ignoreEdit,"BOTTOMLEFT",0,-8)
+    help:SetWidth(500)
+    help:SetJustifyH("LEFT")
+    help:SetText(
+        "You can also ignore players from LFG/Trade rows, from Spam Trainer suggestions, or with /ccf ignore PlayerName."
+    )
+
+    Heading(p,"Ignored player list",18,-245)
+
+    local i
+    for i=1,10 do
+        local row=CreateFrame("Frame",nil,p)
+        row:SetWidth(565)
+        row:SetHeight(27)
+        row:SetPoint("TOPLEFT",18,-268-((i-1)*28))
+
+        if i%2==0 then
+            local bg=row:CreateTexture(nil,"BACKGROUND")
+            bg:SetAllPoints()
+            bg:SetTexture(1,1,1,.04)
+        end
+
+        row.name=row:CreateFontString(nil,"OVERLAY","GameFontHighlight")
+        row.name:SetPoint("LEFT",4,0)
+        row.name:SetWidth(255)
+        row.name:SetJustifyH("LEFT")
+
+        row.source=row:CreateFontString(nil,"OVERLAY","GameFontDisableSmall")
+        row.source:SetPoint("LEFT",265,0)
+        row.source:SetWidth(220)
+        row.source:SetJustifyH("LEFT")
+
+        row.remove=Button(row,"Remove",65,20)
+        row.remove:SetPoint("RIGHT",-2,0)
+        row.remove:SetScript("OnClick",function(self)
+            local item=self:GetParent().item
+            if item then
+                local ok,msg=CCF:RemoveIgnoredPlayer(item.key)
+                CCF:Print(msg)
+                RefreshIgnored()
+            end
+        end)
+
+        ignoreRows[i]=row
+    end
+
+    p.ignorePrev=Button(p,"< Previous",85,22)
+    p.ignorePrev:SetPoint("TOPLEFT",20,-558)
+
+    p.ignoreNext=Button(p,"Next >",85,22)
+    p.ignoreNext:SetPoint("TOPLEFT",500,-558)
+
+    p.ignorePage=p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall")
+    p.ignorePage:SetPoint("TOP",0,-563)
+    p.ignorePage:SetWidth(260)
+    p.ignorePage:SetJustifyH("CENTER")
+
+    p.ignorePrev:SetScript("OnClick",function()
+        ignoreOffset=math.max(0,ignoreOffset-#ignoreRows)
+        RefreshIgnored()
+    end)
+
+    p.ignoreNext:SetScript("OnClick",function()
+        ignoreOffset=ignoreOffset+#ignoreRows
+        RefreshIgnored()
+    end)
+
+    table.insert(refreshers,RefreshIgnored)
+    CCF:RegisterCallback("IGNORES_UPDATED",RefreshIgnored)
     p.refresh=RefreshAll
 end
 
@@ -231,15 +406,17 @@ end
 
 function CCF:OpenOptions(section)
     local key=self:Lower(section or "")
+    if key=="ignore" or key=="ignorelist" then key="ignored" end
     local target=panels[key] or ((key=="lfg" or key=="trade") and panels.boards) or panels.general
     if not target then return end
     InterfaceOptionsFrame_OpenToCategory(target); InterfaceOptionsFrame_OpenToCategory(target)
 end
 
 local function Init()
-    CreateGeneral(); CreateFilter(); CreateTrainer(); CreateBoards(); CreateChannels()
+    CreateGeneral(); CreateBoards(); CreateFilter(); CreateTrainer(); CreateIgnoredPlayers(); CreateChannels()
     CCF:RegisterCallback("WORDS_UPDATED",RefreshWords); CCF:RegisterCallback("TRAINER_UPDATED",RefreshAll)
     CCF:RegisterCallback("OPTIONS_UPDATED",RefreshAll); CCF:RegisterCallback("BOARD_UPDATED",RefreshAll)
+    CCF:RegisterCallback("IGNORES_UPDATED",RefreshAll)
     RefreshAll()
 end
 
