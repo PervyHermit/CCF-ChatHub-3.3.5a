@@ -175,20 +175,24 @@ local function CreateBoards()
     Checkbox(p,"Collect WTS / WTB / WTT and profession requests",332,-89,function() return CCF.db.boards.collectTrade end,function(v) CCF.db.boards.collectTrade=v end)
     Checkbox(p,"Hide captured trade messages from normal chat",332,-117,function() return CCF.db.boards.hideTrade end,function(v) CCF.db.boards.hideTrade=v end)
     local ti=p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); ti:SetPoint("TOPLEFT",355,-151); ti:SetWidth(245); ti:SetJustifyH("LEFT"); ti:SetText("The Trade page has quick filters for WTS, WTB, WTT, and profession/service requests.")
-    Heading(p,"Scan these chat types for both boards",18,-235)
+
+    Heading(p,"Board session",18,-215)
+    Checkbox(p,"Clear LFG and Trade boards on login or /reload",15,-232,function() return CCF.db.boards.clearOnLogin end,function(v) CCF.db.boards.clearOnLogin=v end)
+
+    Heading(p,"Scan these chat types for both boards",18,-275)
     local sources={{"Say","say"},{"Yell","yell"},{"Emotes and text emotes","emote"},{"Numbered and custom channels","channel"}}
     local i
     for i=1,#sources do
         local label,key=sources[i][1],sources[i][2]
-        Checkbox(p,label,15,-252-((i-1)*27),function() return CCF.db.boards.sources[key] end,function(v) CCF.db.boards.sources[key]=v end)
+        Checkbox(p,label,15,-292-((i-1)*27),function() return CCF.db.boards.sources[key] end,function(v) CCF.db.boards.sources[key]=v end)
     end
-    Slider(p,"CustomChatFilterExpirySliderV21","Entry expiry (minutes)",335,-260,250,5,60,5,function() return CCF.db.boards.expiryMinutes end,function(v) CCF.db.boards.expiryMinutes=v end)
-    Slider(p,"CustomChatFilterMaxEntriesSliderV21","Maximum entries per board",335,-330,250,50,400,50,function() return CCF.db.boards.maxEntries end,function(v) CCF.db.boards.maxEntries=v end)
-    local ol=Button(p,"Open LFG Board",140,26); ol:SetPoint("TOPLEFT",20,-405); ol:SetScript("OnClick",function() CCF:OpenPage("lfg") end)
+    Slider(p,"CustomChatFilterExpirySliderV21","Entry expiry (minutes)",335,-300,250,5,60,5,function() return CCF.db.boards.expiryMinutes end,function(v) CCF.db.boards.expiryMinutes=v end)
+    Slider(p,"CustomChatFilterMaxEntriesSliderV21","Maximum entries per board",335,-370,250,50,400,50,function() return CCF.db.boards.maxEntries end,function(v) CCF.db.boards.maxEntries=v end)
+    local ol=Button(p,"Open LFG Board",140,26); ol:SetPoint("TOPLEFT",20,-435); ol:SetScript("OnClick",function() CCF:OpenPage("lfg") end)
     local ot=Button(p,"Open Trade Board",140,26); ot:SetPoint("LEFT",ol,"RIGHT",10,0); ot:SetScript("OnClick",function() CCF:OpenPage("trade") end)
     local ow=Button(p,"Open Active Window",150,26); ow:SetPoint("LEFT",ot,"RIGHT",10,0); ow:SetScript("OnClick",function() CCF.db.activeWindow.hide=false; if CCF.ShowActiveWindow then CCF:ShowActiveWindow() end; CCF:Fire("OPTIONS_UPDATED") end)
-    Checkbox(p,"Show standalone active-instances window",18,-445,function() return not CCF.db.activeWindow.hide end,function(v) CCF.db.activeWindow.hide=not v; if CCF.UpdateActiveWindowVisibility then CCF:UpdateActiveWindowVisibility() end end)
-    local note=p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); note:SetPoint("TOPLEFT",38,-475); note:SetWidth(570); note:SetJustifyH("LEFT"); note:SetText("The standalone window shows only currently active LFG instances so players can keep a compact overview while questing.")
+    Checkbox(p,"Show standalone active-instances window",18,-475,function() return not CCF.db.activeWindow.hide end,function(v) CCF.db.activeWindow.hide=not v; if CCF.UpdateActiveWindowVisibility then CCF:UpdateActiveWindowVisibility() end end)
+    local note=p:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); note:SetPoint("TOPLEFT",38,-505); note:SetWidth(570); note:SetJustifyH("LEFT"); note:SetText("The standalone window shows only currently active LFG instances so players can keep a compact overview while questing.")
     p.refresh=RefreshAll
 end
 

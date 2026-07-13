@@ -38,6 +38,11 @@ local function Age(timestamp)
     return math.floor(minutes / 60) .. "h"
 end
 
+local function Clock(timestamp)
+    if not timestamp then return "—" end
+    return date("%H:%M", timestamp)
+end
+
 local function Tell(author)
     if not author or author == "" then return end
     if ChatFrame_SendTell then ChatFrame_SendTell(author)
@@ -386,7 +391,13 @@ local function RefreshBoard()
     local list=FilteredBoard(page); local total=#list; local maxOffset=math.max(0,total-shownBoard)
     if boardOffset>maxOffset then boardOffset=maxOffset end
     hub.title:SetText(page=="lfg" and "Looking for Group" or "Trade — WTS / WTB / WTT")
-    hub.subtitle:SetText(total.." matching entr"..(total==1 and "y" or "ies").." · expires after "..CCF.db.boards.expiryMinutes.." minutes")
+    local sessionStarted, lastUpdated = CCF:GetBoardSessionInfo(page)
+    hub.subtitle:SetText(
+        total.." matching entr"..(total==1 and "y" or "ies")
+        .." · Session started "..Clock(sessionStarted)
+        .." · Last message "..Clock(lastUpdated)
+        .." · Expiry "..CCF.db.boards.expiryMinutes.."m"
+    )
     local i
     for i=1,MAX_BOARD do
         local row,e=boardRows[i],nil; if i<=shownBoard then e=list[i+boardOffset] end; row.entry=e
@@ -444,7 +455,7 @@ local function ApplyPage()
     local boardPage=page=="lfg" or page=="trade"
     Show(hub.boardContainer,boardPage); Show(hub.trainerContainer,page=="trainer")
     Show(hub.activityPanel,page=="lfg"); Show(hub.tradeToolbar,page=="trade")
-    Show(hub.hideCaptured,boardPage); Show(hub.hideCapturedText,boardPage); Show(hub.clearButton,boardPage)
+    Show(hub.hideCaptured,boardPage); Show(hub.hideCapturedText,boardPage); Show(hub.clearButton,boardPage); Show(hub.clearAllButton,boardPage)
     Show(hub.finishTrainer,page=="trainer"); Show(hub.selectAll,page=="trainer"); Show(hub.selectNone,page=="trainer")
     Show(hub.searchLabel,boardPage); Show(hub.searchBox,boardPage)
     hub.boardContainer:ClearAllPoints(); hub.boardContainer:SetPoint("TOP",hub,"TOP",0,-132); hub.boardContainer:SetPoint("BOTTOM",hub,"BOTTOM",0,65); hub.boardContainer:SetPoint("RIGHT",hub,"RIGHT",-24,0)
@@ -517,6 +528,7 @@ local function RefreshActiveWindow()
         if item then
             row.name:SetText(ActivityLabel(item.activity, false))
             row.count:SetText("(" .. item.count .. ")")
+            row.newText:SetText(item.isNew and "|cff55ff55NEW|r" or "")
             row:Show()
         else
             row:Hide()
@@ -597,9 +609,12 @@ local function CreateActiveWindow()
         row:SetPoint("RIGHT", 0, 0)
         if i % 2 == 0 then local bg=row:CreateTexture(nil, "BACKGROUND"); bg:SetAllPoints(); bg:SetTexture(1,1,1,.04) end
         row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        row.name:SetPoint("LEFT", 4, 0); row.name:SetWidth(150); row.name:SetJustifyH("LEFT"); row.name:SetWordWrap(false)
+        row.name:SetPoint("LEFT", 4, 0); row.name:SetJustifyH("LEFT"); row.name:SetWordWrap(false)
         row.count = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        row.count:SetPoint("RIGHT", -4, 0); row.count:SetJustifyH("RIGHT")
+        row.count:SetPoint("RIGHT", -4, 0); row.count:SetWidth(30); row.count:SetJustifyH("RIGHT")
+        row.newText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        row.newText:SetPoint("RIGHT", row.count, "LEFT", -4, 0); row.newText:SetWidth(32); row.newText:SetJustifyH("RIGHT")
+        row.name:SetPoint("RIGHT", row.newText, "LEFT", -4, 0)
         row:SetScript("OnClick", function(self)
             if not self.item then return end
             selectedActivities = {}
@@ -700,6 +715,7 @@ local function CreateHub()
     hub.nextButton=Button(hub,"Next >",90,22); hub.nextButton:SetPoint("LEFT",hub.prevButton,"RIGHT",5,0)
     hub.pageText=hub:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); hub.pageText:SetPoint("LEFT",hub.nextButton,"RIGHT",12,0); hub.pageText:SetWidth(180); hub.pageText:SetJustifyH("LEFT")
     hub.clearButton=Button(hub,"Clear Board",100,22); hub.clearButton:SetPoint("BOTTOMRIGHT",-25,27)
+    hub.clearAllButton=Button(hub,"Clear LFG + Trade",125,22); hub.clearAllButton:SetPoint("RIGHT",hub.clearButton,"LEFT",-5,0)
     hub.hideCaptured=CreateFrame("CheckButton",nil,hub,"UICheckButtonTemplate"); hub.hideCaptured:SetWidth(24); hub.hideCaptured:SetHeight(24); hub.hideCaptured:SetPoint("BOTTOMRIGHT",hub.clearButton,"TOPRIGHT",0,5)
     hub.hideCapturedText=hub:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); hub.hideCapturedText:SetPoint("RIGHT",hub.hideCaptured,"LEFT",-2,0); hub.hideCapturedText:SetJustifyH("RIGHT")
     hub.finishTrainer=Button(hub,"Apply Checked & Dismiss Rest",220,24); hub.finishTrainer:SetPoint("BOTTOMRIGHT",-25,26)
@@ -709,6 +725,7 @@ local function CreateHub()
     hub.prevButton:SetScript("OnClick",function() if page=="trainer" then trainerOffset=math.max(0,trainerOffset-shownTrainer) else boardOffset=math.max(0,boardOffset-shownBoard) end; CCF:RefreshHub() end)
     hub.nextButton:SetScript("OnClick",function() if page=="trainer" then trainerOffset=trainerOffset+shownTrainer else boardOffset=boardOffset+shownBoard end; CCF:RefreshHub() end)
     hub.clearButton:SetScript("OnClick",function() CCF:ClearBoard(page); boardOffset=0; selectedActivities={}; CCF:RefreshHub() end)
+    hub.clearAllButton:SetScript("OnClick",function() CCF:ClearAllBoards(true,"manual"); CCF:Print("LFG and Trade boards cleared; a new board session has started.") end)
     hub.hideCaptured:SetScript("OnClick",function(self) if page=="lfg" then CCF.db.boards.hideLFG=self:GetChecked() and true or false else CCF.db.boards.hideTrade=self:GetChecked() and true or false end; CCF:Fire("OPTIONS_UPDATED") end)
     hub.selectAll:SetScript("OnClick",function()
         local n
@@ -762,8 +779,27 @@ function CCF:OpenPage(which)
     boardOffset,trainerOffset=0,0; if menu then menu:Hide() end; hub:Show(); self:RefreshHub()
 end
 
+local function ResetBoardViewState()
+    selectedActivities = {}
+    boardOffset = 0
+    activityOffset = 0
+    tradeFilter = "ALL"
+    searchText = ""
+
+    if hub and hub.searchBox then
+        hub.searchBox:SetText("")
+    end
+
+    if hub then
+        CCF:RefreshHub()
+    end
+
+    RefreshActiveWindow()
+end
+
 local function Init()
     CreateHub(); CreateMenu(); CreateMinimap(); CreateActiveWindow()
+    CCF:RegisterCallback("BOARD_SESSION_RESET",ResetBoardViewState)
     CCF:RegisterCallback("BOARD_UPDATED",function(category) if hub and hub:IsShown() and page==category then CCF:RefreshHub() end; MenuLabels(); RefreshActiveWindow() end)
     CCF:RegisterCallback("TRAINER_UPDATED",function() UpdateBadge(); MenuLabels(); if hub and hub:IsShown() and page=="trainer" then RefreshTrainer() end end)
     CCF:RegisterCallback("IGNORES_UPDATED",function() MenuLabels(); if hub and hub:IsShown() then CCF:RefreshHub() end; RefreshActiveWindow() end)

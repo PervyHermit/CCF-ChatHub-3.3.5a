@@ -5,12 +5,16 @@
 CustomChatFilter = CustomChatFilter or {}
 local CCF = CustomChatFilter
 
-CCF.VERSION = "2.3.0-beta.4"
+CCF.VERSION = "2.3.0-beta.5"
 CCF.PREFIX = "|cff33ff99CCF:|r "
 CCF.ready = false
 CCF.readyCallbacks = CCF.readyCallbacks or {}
 CCF.callbacks = CCF.callbacks or {}
 CCF.boards = CCF.boards or { lfg = {}, trade = {} }
+CCF.boardSession = CCF.boardSession or {
+    startedAt = time(),
+    lastUpdated = { lfg = nil, trade = nil },
+}
 CCF.recentSpam = CCF.recentSpam or {}
 CCF.dispatchCache = CCF.dispatchCache or {}
 CCF.playerName = nil
@@ -18,7 +22,7 @@ CCF.activityById = {}
 CCF.activityOrder = {}
 
 local DEFAULTS = {
-    version = 5,
+    version = 6,
     enabled = true,
     words = {},
     blockForeignScripts = true,
@@ -55,12 +59,14 @@ local DEFAULTS = {
         y = 20,
     },
     boards = {
+        clearOnLogin = true,
         collectLFG = true,
         collectTrade = true,
         hideLFG = false,
         hideTrade = false,
         maxEntries = 200,
         expiryMinutes = 15,
+        cache = { lfg = {}, trade = {} },
         sources = { say = true, yell = true, emote = false, channel = true },
     },
     trainer = {
@@ -218,8 +224,49 @@ function CCF:InitializeDatabase()
         CustomChatFilterDB.trainer.threshold = 4
     end
 
-    CustomChatFilterDB.version = 4
+    CustomChatFilterDB.version = 6
     self.db = CustomChatFilterDB
+
+    if type(self.db.boards.cache) ~= "table" then
+        self.db.boards.cache = { lfg = {}, trade = {} }
+    end
+    if type(self.db.boards.cache.lfg) ~= "table" then
+        self.db.boards.cache.lfg = {}
+    end
+    if type(self.db.boards.cache.trade) ~= "table" then
+        self.db.boards.cache.trade = {}
+    end
+    self.boards = self.db.boards.cache
+    self:PruneBoard("lfg")
+    self:PruneBoard("trade")
+
+    local earliest = nil
+    local lastUpdated = { lfg = nil, trade = nil }
+    local categories = { "lfg", "trade" }
+    local categoryIndex, entryIndex
+
+    for categoryIndex = 1, #categories do
+        local category = categories[categoryIndex]
+        local board = self.boards[category]
+
+        for entryIndex = 1, #board do
+            local entry = board[entryIndex]
+            local firstSeen = entry.firstSeen or entry.lastSeen
+            local lastSeen = entry.lastSeen or entry.firstSeen
+
+            if firstSeen and (not earliest or firstSeen < earliest) then
+                earliest = firstSeen
+            end
+            if lastSeen and (not lastUpdated[category] or lastSeen > lastUpdated[category]) then
+                lastUpdated[category] = lastSeen
+            end
+        end
+    end
+
+    self.boardSession = {
+        startedAt = earliest or time(),
+        lastUpdated = lastUpdated,
+    }
 
     local legacy = CustomChatFilterSpamTrainerDB
     local trainer = self.db.trainer
@@ -736,6 +783,40 @@ function CCF:ParseLFGMetadata(message)
     return meta
 end
 
+function CCF:EnsureBoardSession()
+    if type(self.boardSession) ~= "table" then
+        self.boardSession = {}
+    end
+
+    if type(self.boardSession.startedAt) ~= "number" then
+        self.boardSession.startedAt = time()
+    end
+
+    if type(self.boardSession.lastUpdated) ~= "table" then
+        self.boardSession.lastUpdated = { lfg = nil, trade = nil }
+    end
+end
+
+function CCF:GetBoardSessionInfo(category)
+    self:EnsureBoardSession()
+    return self.boardSession.startedAt, self.boardSession.lastUpdated[category]
+end
+
+function CCF:ClearAllBoards(startNewSession, reason)
+    self.boards.lfg = {}
+    self.boards.trade = {}
+    self:EnsureBoardSession()
+
+    if startNewSession then
+        self.boardSession.startedAt = time()
+    end
+
+    self.boardSession.lastUpdated = { lfg = nil, trade = nil }
+    self:Fire("BOARD_SESSION_RESET", reason or "manual")
+    self:Fire("BOARD_UPDATED", "lfg")
+    self:Fire("BOARD_UPDATED", "trade")
+end
+
 function CCF:PruneBoard(category)
     local board = self.boards[category]
     if not board then return end
@@ -772,6 +853,8 @@ function CCF:AddBoardEntry(category, message, author, channelName, activities, a
             entry.activitySet = activitySet or {}
             entry.tradeType = tradeType
             entry.meta = metadata
+            self:EnsureBoardSession()
+            self.boardSession.lastUpdated[category] = now
             if index > 1 then table.remove(board, index); table.insert(board, 1, entry) end
             self:Fire("BOARD_UPDATED", category)
             return
@@ -793,40 +876,82 @@ function CCF:AddBoardEntry(category, message, author, channelName, activities, a
         meta = metadata,
     })
     while #board > (self.db.boards.maxEntries or 200) do table.remove(board) end
+    self:EnsureBoardSession()
+    self.boardSession.lastUpdated[category] = now
     self:Fire("BOARD_UPDATED", category)
 end
 
 function CCF:ClearBoard(category)
     if self.boards[category] then
         self.boards[category] = {}
+        self:EnsureBoardSession()
+        self.boardSession.lastUpdated[category] = nil
         self:Fire("BOARD_UPDATED", category)
     end
 end
 
 function CCF:GetActiveActivities()
     self:PruneBoard("lfg")
-    local counts = {}
+
+    local stats = {}
     local board = self.boards.lfg
     local index, activityIndex
+
     for index = 1, #board do
-        for activityIndex = 1, #(board[index].activities or {}) do
-            local id = board[index].activities[activityIndex]
-            counts[id] = (counts[id] or 0) + 1
+        local entry = board[index]
+        for activityIndex = 1, #(entry.activities or {}) do
+            local id = entry.activities[activityIndex]
+            local item = stats[id]
+
+            if not item then
+                item = {
+                    count = 0,
+                    firstSeen = entry.firstSeen or entry.lastSeen or time(),
+                    lastSeen = entry.lastSeen or entry.firstSeen or time(),
+                }
+                stats[id] = item
+            end
+
+            item.count = item.count + 1
+            item.firstSeen = math.min(item.firstSeen, entry.firstSeen or item.firstSeen)
+            item.lastSeen = math.max(item.lastSeen, entry.lastSeen or item.lastSeen)
         end
     end
+
     local result = {}
-    local id, count
-    for id, count in pairs(counts) do
+    local id, item
+    local now = time()
+
+    for id, item in pairs(stats) do
         local activity = self.activityById[id]
-        if activity then table.insert(result, { id = id, count = count, activity = activity }) end
+        if activity then
+            table.insert(result, {
+                id = id,
+                count = item.count,
+                firstSeen = item.firstSeen,
+                lastSeen = item.lastSeen,
+                isNew = now - item.firstSeen <= 30,
+                activity = activity,
+            })
+        end
     end
+
     table.sort(result, function(a, b)
+        if a.count ~= b.count then
+            return a.count > b.count
+        end
+
         local order = { Dungeon = 1, Raid = 2, ["World Boss"] = 3, Boss = 4 }
-        local ao, bo = order[a.activity.kind] or 9, order[b.activity.kind] or 9
-        if ao ~= bo then return ao < bo end
-        if a.count ~= b.count then return a.count > b.count end
+        local ao = order[a.activity.kind] or 9
+        local bo = order[b.activity.kind] or 9
+
+        if ao ~= bo then
+            return ao < bo
+        end
+
         return a.activity.name < b.activity.name
     end)
+
     return result
 end
 
@@ -1356,6 +1481,13 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
     end
     if event == "PLAYER_LOGIN" then
         CCF.playerName = UnitName("player")
+
+        if CCF.db.boards.clearOnLogin then
+            CCF:ClearAllBoards(true, "login")
+        else
+            CCF:EnsureBoardSession()
+        end
+
         CCF:PrintStatus()
     end
 end)

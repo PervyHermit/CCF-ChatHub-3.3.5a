@@ -55,7 +55,8 @@ CCF Chat Hub combines custom chat filtering, non-Latin script blocking, repeat-s
 - Suggests distinctive words or phrases
 - Never adds filters automatically
 - Review suggestions using checkboxes
-- **Add Checked & Dismiss Rest** adds selected phrases and dismisses the others
+- **Apply Checked & Dismiss Rest** adds selected phrases, can ignore selected senders, and dismisses the others
+- Detects repeated-word spam inside one message, such as `hello hello hello hello`
 - LFG and Trade posts can be excluded from spam training
 
 ### Looking for Group board
@@ -71,6 +72,11 @@ CCF Chat Hub combines custom chat filtering, non-Latin script blocking, repeat-s
 - Searchable activity list
 - One-click whisper button
 - Repeated adverts are combined into one entry
+- Boards start fresh on login and `/reload` by default
+- Shows the board-session start time and most recent message time
+- Active activities are ordered by current post count
+- Newly active instances receive a short **NEW** marker in the standalone tracker
+- Includes a compact, pinned Active Instances tracker window
 
 ### Trade board
 
@@ -83,6 +89,14 @@ CCF Chat Hub combines custom chat filtering, non-Latin script blocking, repeat-s
 - Separate category filters
 - One-click whisper button
 - Repeated adverts are combined into one entry
+- Includes a one-click **Clear LFG + Trade** action
+
+### Player ignore list
+
+- CCF-specific account-wide player ignore list
+- Ignore players directly from LFG/Trade rows
+- Spam Trainer suggestions can add detected senders to the ignore list
+- Optional filtering of ignored players in guild, party, raid, and battleground chat
 
 ### Interface
 
@@ -94,6 +108,7 @@ CCF Chat Hub combines custom chat filtering, non-Latin script blocking, repeat-s
   - Spam Filter
   - Spam Trainer
   - LFG & Trade
+  - Ignored Players
   - Channel Sources
 
 ## Installation
@@ -148,15 +163,6 @@ Your existing custom word list should remain in the same SavedVariables database
 - **Left-click:** open the quick CCF menu
 - **Right-click:** open CCF options
 - **Drag:** reposition the minimap button
-
-The quick menu contains:
-
-- LFG
-- Active Instances
-- Trade
-- Spam Suggestions
-
-The standalone Active Instances tracker is pinned: opening and closing the world map should no longer dismiss it.
 
 Hide the minimap button with:
 
