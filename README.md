@@ -15,27 +15,27 @@ CCF Chat Hub combines custom chat filtering, non-Latin script blocking, repeat-s
 
 ### Looking for Group board
 
-![Looking for Group board](Screenshots/lfg-board.png)
+![Looking for Group board](Screenshots/lfg-board.png?v=2.3.0-beta.5)
 
 ### Instance Tracker
 
-![Active Instance Tracker](Screenshots/instance-tracker.png)
+![Active Instance Tracker](Screenshots/instance-tracker.png?v=2.3.0-beta.5)
 
 ### Trade board
 
-![Trade board](Screenshots/trade-board.png)
+![Trade board](Screenshots/trade-board.png?v=2.3.0-beta.5)
 
 ### Spam Trainer
 
-![Spam Trainer suggestions](Screenshots/spam-trainer.png)
+![Spam Trainer suggestions](Screenshots/spam-trainer.png?v=2.3.0-beta.5)
 
 ### Addon settings
 
-![CCF addon settings](Screenshots/addon-settings.png)
+![CCF addon settings](Screenshots/addon-settings.png?v=2.3.0-beta.5)
 
 ### Minimap menu
 
-![CCF minimap menu](Screenshots/minimap-menu.png)
+![CCF minimap menu](Screenshots/minimap-menu.png?v=2.3.0-beta.5)
 
 ## Features
 
