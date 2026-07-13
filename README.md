@@ -17,6 +17,10 @@ CCF Chat Hub combines custom chat filtering, non-Latin script blocking, repeat-s
 
 ![Looking for Group board](Screenshots/lfg-board.png)
 
+### Instance Tracker
+
+![Active Instance Tracker](Screenshots/instance-tracker.png)
+
 ### Trade board
 
 ![Trade board](Screenshots/trade-board.png)
