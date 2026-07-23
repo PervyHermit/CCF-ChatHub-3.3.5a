@@ -55,6 +55,8 @@ CCF Chat Hub combines custom chat filtering, non-Latin script blocking, repeat-s
 ### Spam Trainer
 
 - Detects repeatedly posted messages
+- Counts repeats per sender, so unrelated players using the same wording do not add up
+- Treats quick copies of one message across several channels as a single posting
 - Default trigger: **4 matching posts within 90 seconds**
 - Suggests distinctive words or phrases
 - Never adds filters automatically
@@ -66,6 +68,7 @@ CCF Chat Hub combines custom chat filtering, non-Latin script blocking, repeat-s
 ### Looking for Group board
 
 - Captures LFG and LFM messages from chat
+- Recognizes compact recruiting forms such as `LF1M`, `LF2M`, `LF3M`, and `LF4M`
 - Recognizes Classic, TBC, and Wrath instances
 - Supports common dungeon and raid abbreviations
 - Detects many raid and dungeon bosses

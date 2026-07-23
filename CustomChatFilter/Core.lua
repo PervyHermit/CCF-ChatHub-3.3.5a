@@ -21,6 +21,10 @@ CCF.playerName = nil
 CCF.activityById = {}
 CCF.activityOrder = {}
 
+-- Identical messages sent to several channels in quick succession are usually
+-- one advert being cross-posted, not several repetitions.
+local CROSS_POST_GRACE_SECONDS = 8
+
 local DEFAULTS = {
     version = 6,
     enabled = true,
@@ -722,6 +726,15 @@ function CCF:ClassifyMessage(message, activities, channelKey)
     local words, set, text = self:Tokenize(message)
     if #words == 0 then return nil, nil end
 
+    local lookingForMore = set.lfm
+    local wordIndex
+    for wordIndex = 1, #words do
+        if string.match(words[wordIndex], "^lf[1-4]m$") then
+            lookingForMore = true
+            break
+        end
+    end
+
     local profession = set.enchanter or set.enchanting or set.blacksmith
         or set.blacksmithing or set.jewelcrafter or set.jewelcrafting
         or set.tailor or set.tailoring or set.alchemist or set.alchemy
@@ -742,7 +755,7 @@ function CCF:ClassifyMessage(message, activities, channelKey)
     end
     if tradeType then return "trade", tradeType end
 
-    local lfg = set.lfg or set.lfm or ContainsPlain(text, "looking for group")
+    local lfg = set.lfg or lookingForMore or ContainsPlain(text, "looking for group")
         or ContainsPlain(text, "looking for more")
         or ContainsPlain(text, "looking for members")
         or ContainsPlain(text, "need tank") or ContainsPlain(text, "need healer")
@@ -1173,6 +1186,7 @@ function CCF:CreateSuggestion(entry)
     local suggestion = {
         id = trainer.nextId,
         fingerprint = entry.fingerprint,
+        observationKey = entry.observationKey,
         phrase = phrase,
         example = entry.example,
         count = entry.count,
@@ -1195,7 +1209,7 @@ function CCF:PruneRecentSpam(now)
     end
 end
 
-function CCF:ObserveSpam(message, author, category)
+function CCF:ObserveSpam(message, author, category, channelKey)
     local trainer = self.db.trainer
     if not trainer.enabled then return end
     if category == "lfg" and trainer.ignoreLFG then return end
@@ -1208,29 +1222,43 @@ function CCF:ObserveSpam(message, author, category)
     local wordCount, unused = 0, nil
     for unused in string.gmatch(fingerprint, "%S+") do wordCount = wordCount + 1 end
     if wordCount < 3 or trainer.ignored[fingerprint] then return end
+
+    -- Repetition is a sender behaviour. Do not let several players saying the
+    -- same common thing add up to a single spam report.
+    local authorKey = self:NormalizePlayerName(author or "")
+    if authorKey == "" then return end
+
     local now = time()
     self:PruneRecentSpam(now)
-    local entry = self.recentSpam[fingerprint]
+    local observationKey = "repeat:" .. authorKey .. "\030" .. fingerprint
+    local entry = self.recentSpam[observationKey]
     if not entry or now - entry.lastSeen > trainer.windowSeconds then
         entry = {
             count = 0,
             firstSeen = now,
             lastSeen = now,
             authors = {},
+            channels = {},
             example = self:StripWoWFormatting(message),
             fingerprint = fingerprint,
+            observationKey = observationKey,
             suggested = false,
         }
-        self.recentSpam[fingerprint] = entry
+        self.recentSpam[observationKey] = entry
     end
-    entry.count = entry.count + 1
+
+    -- Treat quick copies to multiple channels as one posting burst. A later
+    -- repeat still counts, even when it is sent to a different channel.
+    local isCrossPost = entry.count > 0
+        and now - entry.lastSeen <= CROSS_POST_GRACE_SECONDS
+        and channelKey and channelKey ~= ""
+        and not entry.channels[channelKey]
+    entry.channels[channelKey or ""] = true
     entry.lastSeen = now
-    if author and author ~= "" then
-        local authorKey = self:NormalizePlayerName(author)
-        if authorKey ~= "" then
-            entry.authors[authorKey] = self:CleanPlayerName(author)
-        end
-    end
+    if isCrossPost then return end
+
+    entry.count = entry.count + 1
+    entry.authors[authorKey] = self:CleanPlayerName(author)
     if not entry.suggested and entry.count >= trainer.threshold then
         entry.suggested = true
         self:CreateSuggestion(entry)
@@ -1256,7 +1284,7 @@ function CCF:FinalizeSuggestions(checkedIds, ignoreAuthorIds)
             ignoredPlayers = ignoredPlayers + self:IgnoreSuggestionAuthors(entry)
         end
 
-        self.recentSpam[entry.fingerprint] = nil
+        self.recentSpam[entry.observationKey or entry.fingerprint] = nil
     end
 
     self.db.trainer.pending = {}
@@ -1271,7 +1299,9 @@ function CCF:ProcessPublicMessage(event, message, author, channelName, channelKe
     if category and boardAllowed then
         self:AddBoardEntry(category, message, author, channelName, activities, activitySet, tradeType)
     end
-    if self:ShouldTrainSource(event, channelKey) then self:ObserveSpam(message, author, category) end
+    if self:ShouldTrainSource(event, channelKey) then
+        self:ObserveSpam(message, author, category, channelKey)
+    end
 
     local blocked = false
     if self.db.enabled and self:ShouldFilterSource(event, channelKey) then

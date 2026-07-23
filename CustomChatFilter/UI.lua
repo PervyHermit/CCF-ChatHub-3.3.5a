@@ -214,6 +214,10 @@ end
 local function CreateBoardRow(parent, index)
     local row = CreateFrame("Frame", nil, parent); row:SetHeight(29)
     if index % 2 == 0 then local bg=row:CreateTexture(nil,"BACKGROUND"); bg:SetAllPoints(); bg:SetTexture(1,1,1,.035) end
+    row.hover = row:CreateTexture(nil,"BACKGROUND")
+    row.hover:SetAllPoints()
+    row.hover:SetTexture(0.18,0.55,0.75,.13)
+    row.hover:Hide()
     row.author = row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); row.author:SetPoint("LEFT",4,0); row.author:SetWidth(105); row.author:SetJustifyH("LEFT")
     row.tag = row:CreateFontString(nil,"OVERLAY","GameFontNormalSmall"); row.tag:SetPoint("LEFT",112,0); row.tag:SetWidth(84); row.tag:SetJustifyH("LEFT")
     row.message = row:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); row.message:SetPoint("LEFT",200,0); row.message:SetPoint("RIGHT",-183,0); row.message:SetJustifyH("LEFT"); row.message:SetWordWrap(false)
@@ -242,6 +246,7 @@ local function CreateBoardRow(parent, index)
     row.ignore:SetScript("OnLeave", function() GameTooltip:Hide() end)
     row.hit:SetScript("OnEnter", function(self)
         local e=self:GetParent().entry; if not e then return end
+        self:GetParent().hover:Show()
         GameTooltip:SetOwner(self,"ANCHOR_RIGHT"); GameTooltip:AddLine(e.author or "?",1,1,1); GameTooltip:AddLine(e.message or "",.9,.9,.9,true)
         local i
         for i=1,#(e.activities or {}) do local a=CCF.activityById[e.activities[i]]; if a then GameTooltip:AddLine("  "..ActivityLabel(a,true),.6,.8,1) end end
@@ -249,7 +254,7 @@ local function CreateBoardRow(parent, index)
         if (e.count or 1)>1 then GameTooltip:AddLine("Repeated "..e.count.." times",.7,.7,.7) end
         GameTooltip:Show()
     end)
-    row.hit:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    row.hit:SetScript("OnLeave", function(self) self:GetParent().hover:Hide(); GameTooltip:Hide() end)
     return row
 end
 
@@ -453,6 +458,10 @@ end
 
 local function ApplyPage()
     local boardPage=page=="lfg" or page=="trade"
+    local tabKey, tab
+    for tabKey, tab in pairs(hub.tabs or {}) do
+        if tabKey==page then tab:LockHighlight() else tab:UnlockHighlight() end
+    end
     Show(hub.boardContainer,boardPage); Show(hub.trainerContainer,page=="trainer")
     Show(hub.activityPanel,page=="lfg"); Show(hub.tradeToolbar,page=="trade")
     Show(hub.hideCaptured,boardPage); Show(hub.hideCapturedText,boardPage); Show(hub.clearButton,boardPage); Show(hub.clearAllButton,boardPage)
@@ -671,17 +680,24 @@ local function CreateHub()
     hub:SetScript("OnDragStop",function(self) self:StopMovingOrSizing(); SaveWindow() end)
     hub:SetScript("OnSizeChanged",function(self) if CCF.db then CCF.db.window.width=self:GetWidth(); CCF.db.window.height=self:GetHeight() end; Layout() end)
 
-    hub.title=hub:CreateFontString(nil,"OVERLAY","GameFontNormalLarge"); hub.title:SetPoint("TOP",0,-16)
-    hub.subtitle=hub:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); hub.subtitle:SetPoint("TOP",hub.title,"BOTTOM",0,-5); hub.subtitle:SetPoint("LEFT",30,0); hub.subtitle:SetPoint("RIGHT",-30,0); hub.subtitle:SetJustifyH("CENTER")
+    hub.title=hub:CreateFontString(nil,"OVERLAY","GameFontNormalLarge"); hub.title:SetPoint("TOP",0,-16); hub.title:SetTextColor(1,.82,0)
+    hub.subtitle=hub:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); hub.subtitle:SetPoint("TOP",hub.title,"BOTTOM",0,-5); hub.subtitle:SetPoint("LEFT",30,0); hub.subtitle:SetPoint("RIGHT",-30,0); hub.subtitle:SetJustifyH("CENTER"); hub.subtitle:SetTextColor(.72,.76,.8)
     local close=CreateFrame("Button",nil,hub,"UIPanelCloseButton"); close:SetPoint("TOPRIGHT",-5,-5)
     local lfg=Button(hub,"LFG",100,24); lfg:SetPoint("TOPLEFT",24,-55)
     local trade=Button(hub,"Trade",100,24); trade:SetPoint("LEFT",lfg,"RIGHT",5,0)
     local trainer=Button(hub,"Trainer",100,24); trainer:SetPoint("LEFT",trade,"RIGHT",5,0)
     local options=Button(hub,"Options",100,24); options:SetPoint("TOPRIGHT",-24,-55)
+    hub.tabs={lfg=lfg,trade=trade,trainer=trainer}
     lfg:SetScript("OnClick",function() page="lfg"; boardOffset=0; CCF:RefreshHub() end)
     trade:SetScript("OnClick",function() page="trade"; boardOffset=0; CCF:RefreshHub() end)
     trainer:SetScript("OnClick",function() page="trainer"; trainerOffset=0; CCF:RefreshHub() end)
     options:SetScript("OnClick",function() CCF:OpenOptions() end)
+
+    local divider=hub:CreateTexture(nil,"ARTWORK")
+    divider:SetTexture(1,.82,0,.22)
+    divider:SetHeight(1)
+    divider:SetPoint("TOPLEFT",24,-84)
+    divider:SetPoint("TOPRIGHT",-24,-84)
 
     hub.searchLabel=hub:CreateFontString(nil,"OVERLAY","GameFontHighlightSmall"); hub.searchLabel:SetPoint("TOPLEFT",26,-91); hub.searchLabel:SetText("Search:")
     hub.searchBox=CreateFrame("EditBox",nil,hub,"InputBoxTemplate"); hub.searchBox:SetHeight(22); hub.searchBox:SetPoint("LEFT",hub.searchLabel,"RIGHT",7,0); hub.searchBox:SetPoint("RIGHT",-290,0); hub.searchBox:SetAutoFocus(false); hub.searchBox:SetMaxLetters(80)
